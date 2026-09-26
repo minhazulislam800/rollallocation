@@ -1,0 +1,51 @@
+name: Build APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # GitHub-hosted ubuntu-latest runners already ship an Android SDK
+      # (ANDROID_HOME) with licenses pre-accepted. We deliberately do NOT use
+      # android-actions/setup-android here: it tries to replace the
+      # preinstalled cmdline-tools with a fresh download and re-run
+      # `sdkmanager --licenses`, which is what was failing. Instead we just
+      # ask the existing sdkmanager for the exact packages this project
+      # needs; if they're already present this is a fast no-op.
+      - name: Ensure required Android SDK packages
+        run: |
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            SDKMANAGER="$(find "$ANDROID_HOME/cmdline-tools" -maxdepth 2 -name sdkmanager | head -n 1)"
+          fi
+          # Non-fatal: on hosted runners these are already accepted, and a
+          # licensing hiccup here must never fail the whole workflow.
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.7
+
+      - name: Build debug APK
+        run: gradle --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: madrasa-roll-apk
+          path: app/build/outputs/apk/debug/*.apk
